@@ -11,9 +11,10 @@ require('dotenv').config();
 const User = require('./routes/User');
 const MentorSession = require('./routes/Sessions');
 const ChatMessage = require('./models/ChatMessage');
+const ChatMessageRoute = require('./routes/ChatMessage');
 const app = express();
 const server = http.createServer(app);
-const Usermodel = require('./models/User');
+const UserModel= require('./models/User');
 
 
 // Configure Socket.IO to allow all origins
@@ -53,6 +54,7 @@ app.use('/api/user/login', limiter); // Example: Apply only to login
 
 app.use('/api/user', User);
 app.use('/api/mentorsession', MentorSession);
+app.use('/api/chatmessage',ChatMessageRoute);
 
 app.get("/", (req, res) => {
   res.status(200).send({ message: 'Hello from the backend' });
@@ -67,8 +69,6 @@ const userSocketMap = {};
 
 io.on('connection', (socket) => {
 
-  // console.log('A user connected:', socket.id);
-
 // Handle user registration to map user ID to socket ID
 socket.on('register', ({ userId }) => {
   userSocketMap[userId] = socket.id;
@@ -76,41 +76,44 @@ socket.on('register', ({ userId }) => {
 });
 
 
-socket.on('getUserDataWithMessages', async () => {
+socket.on('getUserDataWithMessages', async ({ userId }) => {
   try {
-    const users = await Usermodel.find({}); // Fetch all users
-    const userData = await Promise.all(users.map(async (user) => {
-      // For each user, find the last message
-      const lastMessage = await ChatMessage.findOne({
-        $or: [{ senderId: user._id }],
-      }).sort({ createdAt: -1 });
 
-      // Correct method to count unread messages
+    let Id = socket.id;
+    const users = await UserModel.find({}).lean(); // Fetch all users efficiently
+
+    const userData = await Promise.all(users.map(async (user) => {
+      // Fetch the last message where the current user is the sender and the specified userId is the receiver
+      const messages = await ChatMessage.find({
+        senderId: user._id, // Corrected: from current user to specified userId
+        receiverId: userId, // This ensures we are fetching messages sent to the specified userId
+      }).sort({ createdAt: -1 }).limit(1).lean();
+
+      const lastMessage = messages.length > 0 ? messages[0] : 'empty';
+
+      // Count unread messages where the current user is the sender and the specified userId is the receiver
       const unreadCount = await ChatMessage.countDocuments({
-        senderId: user._id,
+        senderId: user._id, // Corrected: Count messages from this user
+        receiverId: userId, // To the specified userId
         isRead: false,
       });
 
-      // Combine user data with message info
       return {
-        ...user.toJSON(),
-        lastMessage: lastMessage || 'empty', // Default to 'empty' if no last message
-        unreadCount: unreadCount || 0, // Default to 0 if no unread messages
+        ...user, // Spread the user data
+        lastMessage, // Simplified: Provide the last message or 'empty' if none
+        unreadCount, // Provide the unread count
       };
     }));
 
-
-
-    socket.emit('userDataWithMessages', userData);
+    const receiverSocketId = userSocketMap[userId];
+    // console.log(userData);
+    io.to(receiverSocketId).emit('userDataWithMessages', userData);
+    // socket.emit('userDataWithMessages', userData);
   } catch (error) {
     console.error('Error fetching user data with messages:', error);
     socket.emit('error', 'Could not fetch user data with messages');
   }
 });
-
-
-
-
 
 
   // Handler for "fetchMessages" event
@@ -172,6 +175,35 @@ socket.on('fetchMessages', async ({ groupId, senderId, receiverId }) => {
       } else if (receiverId) {
         const receiverSocketId = userSocketMap[receiverId];
         console.log(receiverSocketId);
+        if (receiverSocketId) {
+          io.to(receiverSocketId).emit('message', savedMessage);
+        } else {
+          console.log(`No active socket for user ${receiverId}`);
+        }
+      }
+
+      socket.emit('message', savedMessage);
+    } catch (error) {
+      console.error('Error saving message:', error);
+      socket.emit('error', 'Message could not be saved');
+    }
+  });
+
+
+  socket.on('newfile', async ({ senderId , fileUrl , receiverId,fileType }) => {
+    // console.log(senderId, fileUrl, receiverId,type);
+    try {
+      const message = new ChatMessage({
+        fileUrl,
+        senderId,
+        receiverId,
+        fileType
+      });
+      const savedMessage = await message.save();
+
+      if (receiverId) {
+        const receiverSocketId = userSocketMap[receiverId];
+        console.log("send to this socket",receiverSocketId);
         if (receiverSocketId) {
           io.to(receiverSocketId).emit('message', savedMessage);
         } else {

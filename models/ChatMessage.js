@@ -3,7 +3,7 @@ const mongoose = require('mongoose');
 const chatMessageSchema = new mongoose.Schema({
     content: {
         type: String,
-        required: true,
+        default: null,
         trim: true
     },
     senderId: {
@@ -29,6 +29,16 @@ const chatMessageSchema = new mongoose.Schema({
         type: Boolean,
         default: false
     },
+    fileUrl: {
+        type: String,
+        trim: true,
+        default: null // Optional, stores the URL of the uploaded file if the message includes a file
+    },
+    fileType: {
+        type: String,
+        trim: true,
+        default: null // Optional, stores the MIME type of the uploaded file if the message includes a file
+    },
     readBy: [{
         userId: {
             type: mongoose.Schema.Types.ObjectId,
@@ -38,20 +48,12 @@ const chatMessageSchema = new mongoose.Schema({
             type: Date,
             default: Date.now
         },
-
     }],
-    createdAt: {
-        type: Date,
-        default: Date.now
-    },
-    updatedAt: {
-        type: Date,
-        default: Date.now
-    }
-}, { timestamps: true }); // Mongoose automatically handles `createdAt` and `updatedAt`
+    // Mongoose automatically handles `createdAt` and `updatedAt` with `{ timestamps: true }`
+}, { timestamps: true });
 
-// Indexes
-chatMessageSchema.index({ senderId: 1, receiverId: 1, groupId: 1 }); // Optimize queries by indexing common fields
+// Optimize queries by indexing common fields
+chatMessageSchema.index({ senderId: 1, receiverId: 1, groupId: 1 });
 
 const ChatMessage = mongoose.model('ChatMessage', chatMessageSchema);
 
