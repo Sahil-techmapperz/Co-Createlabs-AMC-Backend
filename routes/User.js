@@ -59,7 +59,7 @@ router.post('/signup', async (req, res) => {
 
 
 // Login route for users
-router.post('/login',async (req, res) => {
+router.post('/login', async (req, res) => {
     const { email, password } = req.body;
 
     try {
@@ -78,14 +78,15 @@ router.post('/login',async (req, res) => {
         }
 
         // Create a JWT token
-        const token = jwt.sign({ userId: user._id }, JWT_SECRET, { expiresIn: '1h' });
+        const token = jwt.sign({ userId: user._id,user:user }, JWT_SECRET, { expiresIn: '1d' });
 
-        res.status(200).json({ message: 'Login successful', token ,"user":user});
+        res.status(200).json({ message: 'Login successful', token });
     } catch (error) {
         console.error(error);
         res.status(500).json({ message: 'Internal Server Error' });
     }
 });
+
 
 
 module.exports = router; // Export the router

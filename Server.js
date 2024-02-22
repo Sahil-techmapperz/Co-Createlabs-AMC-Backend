@@ -79,7 +79,6 @@ socket.on('register', ({ userId }) => {
 socket.on('getUserDataWithMessages', async ({ userId }) => {
   try {
 
-    let Id = socket.id;
     const users = await UserModel.find({}).lean(); // Fetch all users efficiently
 
     const userData = await Promise.all(users.map(async (user) => {
