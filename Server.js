@@ -57,7 +57,7 @@ app.use('/api/mentorsession', MentorSession);
 app.use('/api/chatmessage',ChatMessageRoute);
 
 app.get("/", (req, res) => {
-  res.status(200).send({ message: 'Hello from the backend' });
+  res.status(200).send({ message: 'Hello from the Co-createlabs backend' });
 });
 
 
