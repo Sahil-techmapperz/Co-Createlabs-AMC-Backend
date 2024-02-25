@@ -17,14 +17,20 @@ const server = http.createServer(app);
 const UserModel= require('./models/User');
 
 
-// Configure Socket.IO to allow all origins
 const io = new Server(server, {
   cors: {
-    origin: "*", // Allow all origins
-    methods: ["GET", "POST"], // Specify methods to allow
-    credentials: true // Required for cookies, authorization headers with HTTPS
+    origin: (origin, callback) => {
+      if (!origin || originIsAllowed(origin)) { // Implement originIsAllowed according to your needs
+        callback(null, true);
+      } else {
+        callback(new Error("Not allowed by CORS"));
+      }
+    },
+    methods: ["GET", "POST"],
+    credentials: true
   }
 });
+
 
 mongoose.connect(process.env.MONGODB_URI)
   .then(() => console.log('Connected to MongoDB'))
