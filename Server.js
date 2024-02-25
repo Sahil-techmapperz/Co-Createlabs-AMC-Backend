@@ -15,20 +15,16 @@ const ChatMessageRoute = require('./routes/ChatMessage');
 const app = express();
 const server = http.createServer(app);
 const UserModel= require('./models/User');
-app.use(express.static('public')); // Make sure this doesn't interfere with /socket.io
 
 
-
-
-
+// Configure Socket.IO to allow all origins
 const io = new Server(server, {
   cors: {
-    origin: "*", // Adjust as necessary, considering security implications
-    methods: ["GET", "POST"],
-    credentials: true
+    origin: "*", // Allow all origins
+    methods: ["GET", "POST"], // Specify methods to allow
+    credentials: true // Required for cookies, authorization headers with HTTPS
   }
 });
-
 
 mongoose.connect(process.env.MONGODB_URI)
   .then(() => console.log('Connected to MongoDB'))
@@ -346,13 +342,8 @@ socket.on('deleteMessage', async ({ messageId }) => {
 
 
 
-app.all('*', (req, res) => {
-  res.status(404).send('Page not found');
-});
 
 
-const PORT = process.env.PORT || 7000; // Use the PORT environment variable, default to 7000 if not set
 
-app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Server running on port http://localhost:${PORT}`);
-});
+const PORT = process.env.PORT || 7000;
+server.listen(PORT, () => console.log(`Server running on port http://localhost:${PORT}`));
