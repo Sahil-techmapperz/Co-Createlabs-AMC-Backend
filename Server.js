@@ -15,17 +15,15 @@ const ChatMessageRoute = require('./routes/ChatMessage');
 const app = express();
 const server = http.createServer(app);
 const UserModel= require('./models/User');
+app.use(express.static('public')); // Make sure this doesn't interfere with /socket.io
+
+
+
 
 
 const io = new Server(server, {
   cors: {
-    origin: (origin, callback) => {
-      if (!origin || originIsAllowed(origin)) { // Implement originIsAllowed according to your needs
-        callback(null, true);
-      } else {
-        callback(new Error("Not allowed by CORS"));
-      }
-    },
+    origin: "*", // Adjust as necessary, considering security implications
     methods: ["GET", "POST"],
     credentials: true
   }
@@ -348,7 +346,9 @@ socket.on('deleteMessage', async ({ messageId }) => {
 
 
 
-
+app.all('*', (req, res) => {
+  res.status(404).send('Page not found');
+});
 
 
 const PORT = process.env.PORT || 7000; // Use the PORT environment variable, default to 7000 if not set
