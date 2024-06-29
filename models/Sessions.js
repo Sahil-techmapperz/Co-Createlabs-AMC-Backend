@@ -5,7 +5,7 @@ const sessionSchema = new mongoose.Schema({
     type: String,
     required: true,
     maxlength: 100,
-    index: true, // Improved querying
+    index: true,
   },
   description: {
     type: String,
@@ -13,7 +13,7 @@ const sessionSchema = new mongoose.Schema({
   },
   sessionLink: {
     type: String,
-    required: true, 
+    required: true,
     validate: {
       validator: function(v) {
         return /^(http|https):\/\/[^ "]+$/.test(v);
@@ -24,7 +24,7 @@ const sessionSchema = new mongoose.Schema({
   startTime: {
     type: Date,
     required: true,
-    index: true, // Improved querying
+    index: true,
     validate: [function(value) {
       return this.endTime && value < this.endTime;
     }, 'Start time must be before end time']
@@ -33,41 +33,34 @@ const sessionSchema = new mongoose.Schema({
     type: Date,
     required: true,
   },
-
-
   location: {
     type: String,
     maxlength: 200,
+    default: 'remote'
   },
   mentor: {
     type: mongoose.Schema.Types.ObjectId,
-    ref: 'User', 
+    ref: 'User',
     required: true,
   },
   Client: {
     type: mongoose.Schema.Types.ObjectId,
-    ref: 'User', 
+    ref: 'User',
     required: true,
   },
-
   status: {
     type: String,
     enum: ['upcoming', 'Inprogress', 'Reschedule', 'completed', 'Canceled'],
     default: 'upcoming',
   },
-
   category: {
     type: String,
     maxlength: 50,
   },
 }, {
-  timestamps: true, // Adds createdAt and updatedAt fields automatically
+  timestamps: true,
 });
 
-
-
-
-
-const Session = mongoose.model('Sessions', sessionSchema);
+const Session = mongoose.model('Session', sessionSchema);
 
 module.exports = Session;

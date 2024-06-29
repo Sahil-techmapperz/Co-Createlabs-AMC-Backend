@@ -1,62 +1,80 @@
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
+const jwt = require('jsonwebtoken');
 const chatApp = express();
 const chatServer = http.createServer(chatApp);
 const ChatMessage = require('./models/ChatMessage');
-const { authenticateSocket } = require('./Middleware');
+const User = require('./models/User'); // Ensure the User model is imported
+const mongoose = require('mongoose');
 
-// Configure Socket.IO to allow all origins
+const JWT_SECRET = process.env.JWT_SECRET || 'ghgsdgjashgdadtqdjcasgd';
+
+const authenticateSocket = (socket, next) => {
+  const token = socket.handshake.auth.token;
+  console.log('Received token:', token); // Debugging statement
+
+  if (!token) {
+    console.log('No token provided');
+    return next(new Error('No token provided'));
+  }
+
+  jwt.verify(token, JWT_SECRET, (err, decoded) => {
+    if (err) {
+      console.log('Authentication error:', err);
+      return next(new Error('Authentication error'));
+    }
+
+    socket.user = decoded; // Attach user info to socket
+    next();
+  });
+};
+
 const io = new Server(chatServer, {
   cors: {
-    origin: "*", // Allow all origins
-    methods: ["GET", "POST"], // Specify methods to allow
-    credentials: true // Required for cookies, authorization headers with HTTPS
+    origin: "*",
+    methods: ["GET", "POST"],
+    credentials: true
   }
 });
 
-
-
-
 io.use(authenticateSocket);
+
+// Connect to MongoDB
+mongoose.connect(process.env.MONGODB_URI || 'mongodb+srv://cocreatelabs1:oioSfhcOZ6xtZn4c@cocreatelab.rswa0ic.mongodb.net/Cocreatelabs_AMC_backend_New')
+  .then(() => console.log('Connected to MongoDB'))
+  .catch(err => console.error('Could not connect to MongoDB', err));
 
 chatApp.get("/", (req, res) => {
   res.status(200).send({ message: 'Hello from the Cocreatedlab AMC Chat backend' });
 });
 
-// User ID to Socket ID mapping
 const userSocketMap = {};
 
+const updateOnlineUsers = () => {
+  const onlineUsers = Object.keys(userSocketMap);
+  io.emit('onlineUsers', onlineUsers);
+};
+
 io.on('connection', (socket) => {
-console.log("Connect");
+  console.log("User connected:", socket.id);
 
-// Example approach for handling multiple devices per user
-socket.on('register', ({ userId }) => {
-    if (!userSocketMap[userId]) {
-      userSocketMap[userId] = new Set();
-    }
-    userSocketMap[userId].add(socket.id);
-    console.log(`User ${userId} mapped to socket ${socket.id}`);
-  });
+  const userId = socket.user.userId; // Get userId from the authenticated user
+  if (!userSocketMap[userId]) {
+    userSocketMap[userId] = new Set();
+  }
+  userSocketMap[userId].add(socket.id);
+  console.log(`User ${userId} mapped to socket ${socket.id}`);
+  updateOnlineUsers();
 
-
-
-  socket.on('typing', ({ userId, isTyping, groupId }) => {
-    // Check if groupId is provided and is not null or empty
-    if (groupId && groupId.trim() !== '') {
-      // If groupId is available, emit the typing event to the group
-      socket.to(groupId).emit('typing', { userId, isTyping });
-    } else {
-      // If groupId is not provided, find the receiver's socket ID using userId
-      // and emit the typing event directly to that user
-      const receiverSocketId = userSocketMap[userId];
-      if (receiverSocketId) {
+  socket.on('typing', ({ userId, isTyping, receiverId }) => {
+    if (receiverId && userSocketMap[receiverId]) {
+      const receiverSocketIds = Array.from(userSocketMap[receiverId]);
+      receiverSocketIds.forEach(receiverSocketId => {
         io.to(receiverSocketId).emit('typing', { userId, isTyping });
-      }
+      });
     }
   });
-  
-
 
   socket.on('fetchMessages', async ({ groupId, senderId, receiverId, page = 1, limit = 50 }) => {
     try {
@@ -64,9 +82,9 @@ socket.on('register', ({ userId }) => {
       const options = {
         sort: { createdAt: 1 },
         limit: limit,
-        skip: (page - 1) * limit, // For pagination
+        skip: (page - 1) * limit
       };
-  
+
       if (groupId) {
         query.groupId = groupId;
       } else if (senderId && receiverId) {
@@ -77,53 +95,95 @@ socket.on('register', ({ userId }) => {
           ]
         };
       }
-  
+
       const messages = await ChatMessage.find(query, null, options)
         .populate('senderId', 'username')
         .populate('receiverId', 'username');
-  
-      // Assuming the client can handle the message objects directly
+
+      console.log(JSON.stringify(messages));
+
       socket.emit('messages', messages);
     } catch (error) {
       console.error('Error fetching messages:', error);
       socket.emit('error', 'Could not fetch messages');
     }
   });
-  
 
-  socket.on('newMessage', async ({ senderId, content, receiverId, groupId }) => {
+  socket.on('newMessage', async ({ senderId, content, receiverId, groupId }, callback) => {
+    console.log(senderId, content, receiverId, groupId);
     if (!content || !senderId || (!receiverId && !groupId)) {
       socket.emit('error', 'Missing required message fields.');
       return;
     }
-  
+
     try {
       const messageData = { content, senderId, receiverId: receiverId || undefined, groupId: groupId || undefined };
       const savedMessage = await new ChatMessage(messageData).save();
-  
-      // For group messages
+
       if (groupId) {
-        // Emit to everyone in the group, including the sender for simplicity
         io.in(groupId).emit('message', savedMessage);
-      } 
-      // For direct messages
-      else if (receiverId && userSocketMap[receiverId]) {
-        // Emit only to the receiver
-        io.to(userSocketMap[receiverId]).emit('message', savedMessage);
-        // Optionally, confirm to the sender that the message was sent (not shown)
-      } 
-      else {
+      } else if (receiverId && userSocketMap[receiverId]) {
+        const receiverSocketIds = Array.from(userSocketMap[receiverId]);
+        receiverSocketIds.forEach(receiverSocketId => {
+          io.to(receiverSocketId).emit('message', savedMessage);
+        });
+      } else {
         console.log(`No active socket for user ${receiverId}`);
-        // Optionally, inform the sender that the receiver is not connected (not shown)
       }
-  
-      // If the sender needs confirmation or additional data (e.g., message ID), send it here
-      // socket.emit('messageSent', { status: 'delivered', messageId: savedMessage._id, ... });
+
+      socket.emit('messageSent', savedMessage);
+      socket.emit('fetchMessages', { senderId, receiverId }); // Fetch messages after sending a new one
+      if (callback) callback('Message delivered');
     } catch (error) {
       console.error('Error saving message:', error);
       socket.emit('error', 'Error saving message.');
+      if (callback) callback('Error saving message');
     }
   });
+
+  socket.on('editMessage', async ({ messageId, newContent, userId }, callback) => {
+    if (!messageId || typeof newContent !== 'string') {
+      socket.emit('error', 'Invalid message ID or content.');
+      return;
+    }
+  
+    try {
+      const message = await ChatMessage.findById(messageId);
+  
+      if (!message) {
+        socket.emit('error', 'Message not found.');
+        return;
+      }
+  
+      if (message.senderId.toString() !== userId) {
+        socket.emit('error', 'User does not have permission to edit this message.');
+        return;
+      }
+  
+      const updatedMessage = await ChatMessage.findByIdAndUpdate(
+        messageId,
+        { $set: { content: newContent, isEdited: true, editedAt: new Date() } },
+        { new: true }
+      );
+  
+      if (updatedMessage.receiverId && userSocketMap[updatedMessage.receiverId]) {
+        const receiverSocketIds = Array.from(userSocketMap[updatedMessage.receiverId]);
+        receiverSocketIds.forEach(receiverSocketId => {
+          io.to(receiverSocketId).emit('messageUpdated', updatedMessage);
+        });
+      } else if (updatedMessage.groupId) {
+        io.in(updatedMessage.groupId).emit('messageUpdated', updatedMessage);
+      }
+  
+      socket.emit('messageUpdated', updatedMessage);
+      if (callback) callback('Message edited');
+    } catch (error) {
+      console.error('Error updating message:', error);
+      socket.emit('error', 'Error updating message');
+      if (callback) callback('Error updating message');
+    }
+  });
+  
   
 
   socket.on('joinRoom', async ({ groupId, page = 1, limit = 50 }) => {
@@ -131,32 +191,26 @@ socket.on('register', ({ userId }) => {
       socket.emit('error', 'Missing or invalid groupId.');
       return;
     }
-  
+
     try {
-      // The user joins the specified room
       socket.join(groupId);
       console.log(`Socket ${socket.id} joined room ${groupId}`);
-  
-      // Fetch historical messages with pagination
+
       const messages = await ChatMessage.find({ groupId })
-        .sort({ createdAt: -1 }) // Fetch the most recent messages first
+        .sort({ createdAt: -1 })
         .limit(limit)
         .skip((page - 1) * limit);
-  
-      // Reverse the messages to display oldest to newest on the client
+
       const historicalMessages = messages.reverse();
-  
-      // Emitting the historical messages back to the user who joined the room
+
       socket.emit('historicalMessages', historicalMessages);
-  
-      // Optionally, confirm to the user that they have joined the room
       socket.emit('joinedRoom', { groupId, messageCount: historicalMessages.length });
     } catch (error) {
       console.error(`Error fetching historical messages for room ${groupId}:`, error);
       socket.emit('error', `Could not fetch historical messages for room ${groupId}.`);
     }
   });
-  
+
 
   socket.on('messageRead', async ({ messageId, userId }) => {
     if (!messageId || !userId) {
@@ -169,25 +223,25 @@ socket.on('register', ({ userId }) => {
         messageId,
         { $addToSet: { readBy: { userId, readAt: new Date() } } },
         { new: true }
-      ).populate('groupId'); // Assuming you want to handle group messages
+      ).populate('groupId');
   
       if (!updatedMessage) {
         socket.emit('error', 'Message not found or could not be updated');
         return;
       }
   
-      // Handling for direct messages
-      if (!updatedMessage.groupId && updatedMessage.senderId !== userId) {
-        const target = userSocketMap[updatedMessage.senderId];
-        if (target) {
-          io.to(target).emit('messageUpdated', updatedMessage);
-        }
-      }
-      // Handling for group messages
-      else if (updatedMessage.groupId) {
+      if (!updatedMessage.groupId && updatedMessage.senderId.toString() !== userId.toString()) {
+        const senderSocketIds = Array.from(userSocketMap[updatedMessage.senderId] || []);
+        senderSocketIds.forEach(senderSocketId => {
+          io.to(senderSocketId).emit('messageUpdated', updatedMessage);
+        });
+      } else if (updatedMessage.groupId) {
         updatedMessage.groupId.members.forEach(memberId => {
-          if (memberId !== userId && userSocketMap[memberId]) {
-            io.to(userSocketMap[memberId]).emit('messageUpdated', updatedMessage);
+          if (memberId.toString() !== userId.toString() && userSocketMap[memberId]) {
+            const memberSocketIds = Array.from(userSocketMap[memberId]);
+            memberSocketIds.forEach(memberSocketId => {
+              io.to(memberSocketId).emit('messageUpdated', updatedMessage);
+            });
           }
         });
       }
@@ -200,58 +254,7 @@ socket.on('register', ({ userId }) => {
   });
   
 
-
-
-  socket.on('editMessage', async ({ messageId, newContent, userId }) => {
-    console.log("Editing message:", messageId);
-  
-    if (!messageId || typeof newContent !== 'string') {
-      socket.emit('error', 'Invalid message ID or content.');
-      return;
-    }
-  
-    try {
-      // Fetch the message first to check permissions
-      const message = await ChatMessage.findById(messageId);
-  
-      if (!message) {
-        socket.emit('error', 'Message not found.');
-        return;
-      }
-  
-      // Verify the user has permission to edit the message
-      if (message.senderId.toString() !== userId) {
-        socket.emit('error', 'User does not have permission to edit this message.');
-        return;
-      }
-  
-      // Proceed with updating the message
-      const updatedMessage = await ChatMessage.findByIdAndUpdate(
-        messageId,
-        { $set: { content: newContent, isUpdate: true } },
-        { new: true }
-      );
-  
-      // For direct messages
-      if (updatedMessage.receiverId && userSocketMap[updatedMessage.receiverId]) {
-        io.to(userSocketMap[updatedMessage.receiverId]).emit('messageUpdated', updatedMessage);
-      }
-      // For group messages
-      else if (updatedMessage.groupId) {
-        io.in(updatedMessage.groupId).emit('messageUpdated', updatedMessage);
-      }
-  
-      // Confirm to the sender that the message was updated
-      socket.emit('messageUpdated', updatedMessage);
-    } catch (error) {
-      console.error('Error updating message:', error);
-      socket.emit('error', 'Error updating message');
-    }
-  });
-  
-
-
-  socket.on('deleteMessage', async ({ messageId, userId }) => {
+  socket.on('deleteMessage', async ({ messageId, userId }, callback) => {
     if (!messageId || !userId) {
       socket.emit('error', 'Invalid request: missing messageId or userId.');
       return;
@@ -265,37 +268,34 @@ socket.on('register', ({ userId }) => {
         return;
       }
   
-      // Verify the user has permission to delete the message
-      // This might involve checking if the userId matches the message's senderId or if the user is an admin
       if (message.senderId.toString() !== userId /* and user is not an admin */) {
         socket.emit('error', 'User does not have permission to delete this message.');
         return;
       }
   
-      // Proceed with deleting the message
-      await message.remove();
+      await ChatMessage.findByIdAndDelete(messageId);
   
-      // For direct messages, notify the receiver
       if (message.receiverId && userSocketMap[message.receiverId]) {
-        io.to(userSocketMap[message.receiverId]).emit('messageDeleted', messageId);
-      }
-      // For group messages, broadcast to the group
-      else if (message.groupId) {
+        const receiverSocketIds = Array.from(userSocketMap[message.receiverId]);
+        receiverSocketIds.forEach(receiverSocketId => {
+          io.to(receiverSocketId).emit('messageDeleted', messageId);
+        });
+      } else if (message.groupId) {
         io.in(message.groupId).emit('messageDeleted', messageId);
       }
   
-      // Confirm to the sender that the message was deleted
       socket.emit('messageDeleted', messageId);
+      if (callback) callback('Message deleted');
     } catch (error) {
       console.error('Error deleting message:', error);
-      socket.emit('error', 'Error deleting message');
+      socket.emit('error', 'Error deleting message.');
+      if (callback) callback('Error deleting message');
     }
   });
   
+  
 
-
-// On disconnect, remove the socket ID from the user's set
-socket.on('disconnect', () => {
+  socket.on('disconnect', () => {
     Object.keys(userSocketMap).forEach(userId => {
       userSocketMap[userId].delete(socket.id);
       if (userSocketMap[userId].size === 0) {
@@ -303,12 +303,9 @@ socket.on('disconnect', () => {
       }
     });
     console.log(`Socket ${socket.id} disconnected`);
+    updateOnlineUsers();
   });
-
 });
-
-
-
 
 const chatPort = 8000;
 chatServer.listen(chatPort, () => {

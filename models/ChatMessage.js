@@ -9,23 +9,20 @@ const chatMessageSchema = new mongoose.Schema({
     senderId: {
         type: mongoose.Schema.Types.ObjectId,
         required: true,
-        ref: 'User' // Assuming you have a User model
+        ref: 'User'
     },
     receiverId: {
         type: mongoose.Schema.Types.ObjectId,
-        ref: 'User', // Optional, for direct messages
+        ref: 'User',
         default: null
     },
     groupId: {
         type: mongoose.Schema.Types.ObjectId,
-        ref: 'Group', // Optional, for group messages
+        ref: 'Group',
         default: null
     },
-    isRead: {
-        type: Boolean,
-        default: false
-    },
-    isUpdate: {
+    readBy: [{ userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' }, readAt: { type: Date } }],
+    isEdited: {
         type: Boolean,
         default: false
     },
@@ -38,12 +35,12 @@ const chatMessageSchema = new mongoose.Schema({
             type: Date,
             default: Date.now
         },
-
     }]
 }, { timestamps: true }); // Mongoose automatically handles `createdAt` and `updatedAt`
 
 // Indexes
-chatMessageSchema.index({ senderId: 1, receiverId: 1, groupId: 1 }); // Optimize queries by indexing common fields
+chatMessageSchema.index({ senderId: 1, receiverId: 1, groupId: 1 });
+chatMessageSchema.index({ groupId: 1, createdAt: 1 }); // For group messages by time
 
 const ChatMessage = mongoose.model('ChatMessage', chatMessageSchema);
 
