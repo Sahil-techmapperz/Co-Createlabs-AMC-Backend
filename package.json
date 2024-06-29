@@ -6,6 +6,7 @@
   "scripts": {
     "start": "nodemon Server.js",
     "start_Chatbackend": "nodemon Chat.js",
+    "start_all": "npm-run-all -p start start_Chatbackend",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
